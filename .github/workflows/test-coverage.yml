@@ -1,0 +1,39 @@
+name: Commit Test Coverage Check
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  test-and-coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Grant Execute Permission to Gradle
+        run: chmod +x gradlew
+
+      - name: Run Unit Tests and Generate JaCoCo Report
+        run: ./gradlew test jacocoTestReport
+
+      - name: Upload JaCoCo Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: jacoco-report
+          path: build/reports/jacoco/test/jacocoTestReport.xml
+
+      - name: Analyze Test Coverage and Comment on PR
+        run: python .github/scripts/analyze_coverage.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
