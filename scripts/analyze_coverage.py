@@ -25,68 +25,84 @@ def get_changed_lines():
                     changed_lines[current_file].append(start_line + i)
     return changed_lines
 
+def get_method_lines():
+    """
+    소스 코드에서 메서드 정의 라인을 찾아 반환한다.
+    """
+    result = subprocess.run([
+        "git", "grep", "-nE", r'^(\s*public|private|protected|static|\s)*\s+\w+\s+\w+\(.*\)\s*\{?$', "--", "*.java"
+    ], capture_output=True, text=True)
+    method_map = {}
+
+    for line in result.stdout.split("\n"):
+        if ":" not in line:
+            continue
+
+        file_info, method_def = line.split(":", 1)
+        filename, method_line = file_info.split(":")
+        method_line = int(method_line)
+
+        method_name_match = re.search(r"(\w+)\s*\(", method_def)
+        if method_name_match:
+            method_name = method_name_match.group(1)
+            if filename not in method_map:
+                method_map[filename] = []
+            method_map[filename].append((method_line, method_name))
+    return method_map
+
+def find_method_for_line(filename, line_number, method_map):
+    """
+    주어진 파일과 라인 번호에 해당하는 메서드 이름을 반환한다.
+    """
+    if filename not in method_map:
+        return "Unknown Method"
+    methods = sorted(method_map[filename])  # 메서드 시작 라인 기준 정렬
+    for i in range(len(methods) - 1):
+        if methods[i][0] <= line_number < methods[i + 1][0]:
+            return methods[i][1]
+    return methods[-1][1] if methods else "Unknown Method"
+
 def parse_jacoco_report(xml_file):
     """
-    JaCoCo XML 리포트에서 테스트된 코드 라인의 라인 번호와 메서드 정보를 추출한다.
+    JaCoCo XML 리포트에서 테스트된 코드 라인의 라인 번호를 추출한다.
     """
     tree = ET.parse(xml_file)
     root = tree.getroot()
     covered_lines = {}
-    method_map = {}
 
     for package in root.findall("package"):
-        for class_ in package.findall("class"):
-            class_name = class_.attrib["name"].replace("/", ".")
+        for sourcefile in package.findall("sourcefile"):
+            filename = sourcefile.attrib["name"]
+            covered_lines[filename] = []
 
-            # 메서드 정보를 저장하여 라인별 소속 메서드를 찾을 수 있도록 함
-            methods = []
-            for method in class_.findall("method"):
-                method_name = method.attrib["name"]
-                method_line = int(method.attrib.get("line", "-1"))
-                if method_line != -1:
-                    methods.append((method_line, method_name))
-
-            methods.sort()  # 메서드 시작 라인을 기준으로 정렬
-
-            for sourcefile in package.findall("sourcefile"):
-                filename = sourcefile.attrib["name"]
-                covered_lines[filename] = {}
-
-                for line in sourcefile.findall("line"):
-                    line_number = int(line.attrib["nr"])
-                    covered_instr = int(line.attrib["ci"])  # Covered Instructions
-
-                    # 해당 코드 라인이 속한 메서드를 찾기
-                    method_name = "Unknown Method"
-                    for i in range(len(methods) - 1):
-                        if methods[i][0] <= line_number < methods[i + 1][0]:
-                            method_name = methods[i][1]
-                            break
-                    if line_number >= methods[-1][0]:
-                        method_name = methods[-1][1]
-
-                    if covered_instr > 0:
-                        covered_lines[filename][line_number] = method_name
-
+            for line in sourcefile.findall("line"):
+                line_number = int(line.attrib["nr"])
+                covered_instr = int(line.attrib["ci"])  # Covered Instructions
+                if covered_instr > 0:
+                    covered_lines[filename].append(line_number)
     return covered_lines
 
-def check_coverage(changed_lines, covered_lines):
+def check_coverage(changed_lines, covered_lines, method_map):
     """
-    변경된 코드가 JaCoCo 리포트에서 테스트되었는지 확인한다.
+    변경된 코드가 JaCoCo 리포트에서 테스트되었는지 확인하고, 해당 메서드를 찾는다.
     """
     uncovered_lines = {}
 
     for file, lines in changed_lines.items():
         filename = file.split("/")[-1]  # 파일명만 추출
         if filename in covered_lines:
-            uncovered_lines[file] = [(line, covered_lines[filename].get(line, "Unknown Method")) for line in lines if line not in covered_lines[filename]]
-
+            uncovered_lines[file] = []
+            for line in lines:
+                if line not in covered_lines[filename]:
+                    method_name = find_method_for_line(file, line, method_map)
+                    uncovered_lines[file].append((line, method_name))
     return uncovered_lines
 
 if __name__ == "__main__":
     changed_lines = get_changed_lines()
     covered_lines = parse_jacoco_report("build/reports/jacoco/test/jacocoTestReport.xml")
-    uncovered_lines = check_coverage(changed_lines, covered_lines)
+    method_map = get_method_lines()
+    uncovered_lines = check_coverage(changed_lines, covered_lines, method_map)
 
     print("changed_lines:", changed_lines)
     print("covered_lines:", covered_lines)

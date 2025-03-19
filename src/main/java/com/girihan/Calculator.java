@@ -6,6 +6,9 @@ public class Calculator {
         if (a<0) {
             System.out.println("add: a is negative");
         }
+        if (b<0) {
+            System.out.println("add: b is negative");
+        }
         return a + b;
     }
     public int subtract(int a, int b) {
