@@ -8,7 +8,9 @@ def get_changed_lines():
 
     result = subprocess.run(["git", "diff", "--unified=0", "HEAD^", "--", "*.java"], 
                             capture_output=True, text=True)
-    
+
+    # print(result)
+
     for line in result.stdout.split("\n"):
         if line.startswith("@@"):
             parts = line.split(" ")
